@@ -90,30 +90,33 @@ bool do_exec(int count, ...)
 */
     
     int kid = fork();
-    switch(kid)
-    {
-        case -1: ;
-                abort();
-        case 0: ;
-                if (execv(command[0], command) == 0) {
-                    exit(0);
-                }
-                else {
-                    abort();
-                }
-        default: ;
-                int wstatus;
-                waitpid(kid, &wstatus, 0);
-                if(WIFEXITED(wstatus)) {
-				if (WEXITSTATUS(wstatus)) {
-                    return false;
-				}
-			    } 
-                else {
-				    return false;
-			    }
-        return true;
+    if (kid ==-1) {
+        abort();        
     }
+
+    else if (kid ==0) {
+        if (execv(command[0], command) == 0) {
+            exit(0);
+        }
+        else {
+            abort();
+        }        
+    }
+
+    else {
+        int wstatus;
+        waitpid(kid, &wstatus, 0);
+        if(WIFEXITED(wstatus)) {
+        if (WEXITSTATUS(wstatus)) {
+            return false;
+        }
+        } 
+        else {
+            return false;
+        }        
+    }
+
+        return true;
 
     va_end(args);
 }
@@ -150,30 +153,31 @@ bool do_exec_redirect(const char *outputfile, int count, ...)
         perror("open"); 
         abort(); 
     }
-    int kid;
-    switch(kid = fork()) {
-		case -1: ;
+    int kid= fork();
+		if (kid == -1) {
+            abort();
+        }
+		else if (kid == 0)  {
+            if (dup2(fd, 1) < 0) {
                 abort();
-		case 0:;
-                if (dup2(fd, 1) < 0) {
-                    abort();
-                }
-                close(fd);
-                execvp(command[0], command); 
-                abort();
+            }
+            close(fd);
+            execvp(command[0], command); 
+            abort();            
+        }
 
-		default:;
-                int wstatus;
-                waitpid(kid, &wstatus, 0);
-                if(WIFEXITED(wstatus) ) {
-                    if (WEXITSTATUS(wstatus)) {
-                        return false;
-                    }
-                } 
-                else {
+		else {
+            int wstatus;
+            waitpid(kid, &wstatus, 0);
+            if(WIFEXITED(wstatus) ) {
+                if (WEXITSTATUS(wstatus)) {
                     return false;
                 }
-    }
+            } 
+            else {
+                return false;
+            }            
+        }
 
     va_end(args);
     return true;
