@@ -92,16 +92,16 @@ bool do_exec(int count, ...)
     int kid = fork();
     switch(kid)
     {
-        case -1:
+        case -1: ;
                 abort();
-        case 0: 
+        case 0: ;
                 if (execv(command[0], command) == 0) {
                     exit(0);
                 }
                 else {
                     abort();
                 }
-        default:
+        default: ;
                 int wstatus;
                 waitpid(kid, &wstatus, 0);
                 if(WIFEXITED(wstatus)) {
@@ -114,7 +114,6 @@ bool do_exec(int count, ...)
 			    }
         return true;
     }
-
 
     va_end(args);
 }
@@ -153,9 +152,9 @@ bool do_exec_redirect(const char *outputfile, int count, ...)
     }
     int kid;
     switch(kid = fork()) {
-		case -1: 
+		case -1: ;
                 abort();
-		case 0:
+		case 0:;
                 if (dup2(fd, 1) < 0) {
                     abort();
                 }
@@ -163,7 +162,7 @@ bool do_exec_redirect(const char *outputfile, int count, ...)
                 execvp(command[0], command); 
                 abort();
 
-		default:
+		default:;
                 int wstatus;
                 waitpid(kid, &wstatus, 0);
                 if(WIFEXITED(wstatus) ) {
