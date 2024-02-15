@@ -1,5 +1,8 @@
 #include "systemcalls.h"
-
+#include <unistd.h>
+#include <stdlib.h>
+#include <fcntl.h>
+#include <sys/wait.h>
 /**
  * @param cmd the command to execute with system()
  * @return true if the command in @param cmd was executed
@@ -7,6 +10,7 @@
  *   either in invocation of the system() call, or if a non-zero return
  *   value was returned by the command issued in @param cmd.
 */
+
 bool do_system(const char *cmd)
 {
 
@@ -15,10 +19,34 @@ bool do_system(const char *cmd)
  *  Call the system() function with the command set in the cmd
  *   and return a boolean true if the system() call completed with success
  *   or false() if it returned a failure
-*/
+*/  
+    bool result = false;
+    if (cmd == NULL) {
+        result = false;
+        // If command is NULL, then a nonzero value if a shell is
+        // available, or 0 if no shell is available.
+    }
 
+    int sy = system(cmd);
+    if (sy == -1){
+        result = false;
+        // If a child process could not be created, or its status could
+        //   not be retrieved, the return value is -1 and errno is set to
+        //   indicate the error.
+    }
 
-    return true;
+    else if (sy == 127){
+        result = false;
+        // If a shell could not be executed in the child process, then
+        //   the return value is as though the child shell terminated by
+        //   calling _exit(2) with the status 127.
+    }
+
+    else if (sy == 0){
+        result = true;
+    }
+
+    return result;
 }
 
 /**
@@ -41,6 +69,7 @@ bool do_exec(int count, ...)
     va_start(args, count);
     char * command[count+1];
     int i;
+
     for(i=0; i<count; i++)
     {
         command[i] = va_arg(args, char *);
@@ -59,10 +88,34 @@ bool do_exec(int count, ...)
  *   as second argument to the execv() command.
  *
 */
+    
+    int kid = fork();
+    switch(kid)
+    {
+        case -1:
+                abort();
+        case 0: 
+                if (execv(command[0], command) == 0) {
+                    exit(0);
+                }
+                else {
+                    abort();
+                }
+        default:
+                int wstatus;
+                waitpid(kid, &wstatus, 0);
+                if(WIFEXITED(wstatus)) {
+				if (WEXITSTATUS(wstatus)) {
+                    return false;
+				}
+			    } 
+                else {
+				    return false;
+			    }
+        return true;
+    }
 
     va_end(args);
-
-    return true;
 }
 
 /**
@@ -85,7 +138,6 @@ bool do_exec_redirect(const char *outputfile, int count, ...)
     // and may be removed
     command[count] = command[count];
 
-
 /*
  * TODO
  *   Call execv, but first using https://stackoverflow.com/a/13784315/1446624 as a refernce,
@@ -93,8 +145,36 @@ bool do_exec_redirect(const char *outputfile, int count, ...)
  *   The rest of the behaviour is same as do_exec()
  *
 */
+    int fd = open(outputfile, O_WRONLY|O_TRUNC|O_CREAT, 0666);
+    if (fd < 0) { 
+        perror("open"); 
+        abort(); 
+    }
+    int kid;
+    switch(kid = fork()) {
+		case -1: 
+                abort();
+		case 0:
+                if (dup2(fd, 1) < 0) {
+                    abort();
+                }
+                close(fd);
+                execvp(command[0], command); 
+                abort();
+
+		default:
+                int wstatus;
+                waitpid(kid, &wstatus, 0);
+                if(WIFEXITED(wstatus) ) {
+                    if (WEXITSTATUS(wstatus)) {
+                        return false;
+                    }
+                } 
+                else {
+                    return false;
+                }
+    }
 
     va_end(args);
-
     return true;
 }
