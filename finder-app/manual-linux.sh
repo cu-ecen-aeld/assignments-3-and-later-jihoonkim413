@@ -38,7 +38,7 @@ if [ ! -e ${OUTDIR}/linux-stable/arch/${ARCH}/boot/Image ]; then
     # export PATH=$PATH:/usr/lib/gcc/gcc-arm-10.3-2021.07-x86_64-aarch64-none-linux-gnu/bin
     make ARCH=${ARCH} CROSS_COMPILE=${CROSS_COMPILE} mrproper
     make ARCH=${ARCH} CROSS_COMPILE=${CROSS_COMPILE} defconfig
-    sed -i "s|YYLTYPE yylloc|extern YYLTYPE yylloc|g" ${OUTDIR}/linux-stable/scripts/dtc/dtc-lexer.lex.c
+    # sed -i "s|YYLTYPE yylloc|extern YYLTYPE yylloc|g" ${OUTDIR}/linux-stable/scripts/dtc/dtc-lexer.lex.c
     make -j4 ARCH=${ARCH} CROSS_COMPILE=${CROSS_COMPILE} all
     echo "all is done"
     make ARCH=${ARCH} CROSS_COMPILE=${CROSS_COMPILE} modules
