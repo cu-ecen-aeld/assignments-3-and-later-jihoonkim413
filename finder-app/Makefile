@@ -1,5 +1,5 @@
 CROSS_COMPILE?=
-CC=$(CROSS_COMPILE)gcc
+CC?=$(CROSS_COMPILE)gcc
 
 .PHONY: all
 all:
