@@ -22,7 +22,7 @@ fi
 
 WRITERAPP=${RUNFILEDIR}writer
 FINDERAPP=${RUNFILEDIR}finder.sh
-username=$(cat ./conf/username.txt)
+username=$(cat ${CONFDIR}/username.txt)
 
 if [ $# -lt 3 ]
 then
