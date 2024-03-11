@@ -1,23 +1,46 @@
 #include <stdio.h>
-#include <stdlib.h>
-#include <unistd.h>
-#include <errno.h>
 #include <string.h>
+#include <strings.h>
+#include <syslog.h>
+#include <stdbool.h>
 #include <sys/types.h>
 #include <sys/socket.h>
-#include <netinet/in.h>
 #include <netdb.h>
 #include <arpa/inet.h>
-#include <sys/wait.h>
-#include <signal.h>
-#include <stdbool.h>
+#include <netinet/in.h>
+#include <errno.h>
+#include <unistd.h>
+#include <stdlib.h>
 #include <sys/stat.h>
+#include <signal.h>
+#include <sys/wait.h>
 
-#define PORT "9000"  // the port users will be connecting to
-#define DATA_FILE "/var/tmp/aesdsocketdata"
+#define DAEMON_KEY          "-d"
+#define PORT                "9000"
+#define DATA_FILE_NAME      "/var/tmp/aesdsocketdata"
+#define RECV_BUFFER_LEN     512
 #define BACKLOG 10   // how many pending connections queue will hold
 
-void sigchld_handler(int s)
+bool is_active = true;
+int sockfd = -1;
+int client_fd = -1;
+
+static void remove_data_file(void){
+    if(remove(DATA_FILE_NAME) == 0){
+        syslog(LOG_INFO, "Removed data file");
+    } else {
+        syslog(LOG_ERR, "Error removing data file: %s", strerror(errno));
+    }
+}
+
+static void *get_in_addr(struct sockaddr *sa){
+    if(sa->sa_family == AF_INET){
+        return &(((struct sockaddr_in *)sa)->sin_addr);
+    }
+    return &(((struct sockaddr_in6 *)sa)->sin6_addr);
+}
+
+void signal_handler(int s)
 {
     // waitpid() might overwrite errno, so we save and restore it:
     int saved_errno = errno;
@@ -27,35 +50,31 @@ void sigchld_handler(int s)
     errno = saved_errno;
 }
 
-// get sockaddr, IPv4 or IPv6:
-void *get_in_addr(struct sockaddr *sa)
-{
-    if (sa->sa_family == AF_INET) {
-        return &(((struct sockaddr_in*)sa)->sin_addr);
-    }
+int main(int argc, char **argv){
 
-    return &(((struct sockaddr_in6*)sa)->sin6_addr);
-}
-
-void send_data_to_client(int client_socket) {
-    FILE *fp = fopen(DATA_FILE, "r");
-    char buffer[1024];
-    while (fgets(buffer, sizeof(buffer), fp) != NULL) {
-        send(client_socket, buffer, strlen(buffer), 0);
-    }
-    fclose(fp);
-}
-
-int main(int argc, char *argv[]) 
-{
-    int sockfd, new_fd;  // listen on sock_fd, new connection on new_fd
     struct addrinfo hints, *servinfo, *p;
-    struct sockaddr_storage their_addr; // connector's address information
-    socklen_t sin_size;
-    struct sigaction sa;
-    int yes=1;
-    char s[INET_ADDRSTRLEN];
+    struct sigaction sa = {0};
+    int res;
+    int return_val = 0;
+    char addr_str[INET6_ADDRSTRLEN];
+    char recv_buffer[RECV_BUFFER_LEN] = {0};
     int rv;
+    int yes=1;
+    bool start_in_daemon = false;
+
+    openlog(argv[0], LOG_PID, LOG_USER);
+
+    sa.sa_handler = signal_handler;
+    sigemptyset(&sa.sa_mask);
+    sa.sa_flags = 0;
+    sigaction(SIGINT, &sa, NULL);
+    sigaction(SIGTERM, &sa, NULL);
+
+    memset(&hints, 0, sizeof(hints));
+    hints.ai_family = AF_UNSPEC;
+    hints.ai_socktype = SOCK_STREAM;
+    hints.ai_flags = AI_PASSIVE;
+    
     bool daemon_mode = 0;
 
     if (argc > 1 && strcmp(argv[1], "-d") == 0) {
@@ -74,11 +93,6 @@ int main(int argc, char *argv[])
         // Child process continues
         umask(0); // Unmask the file mode
     }
-
-    memset(&hints, 0, sizeof hints);
-    hints.ai_family = AF_UNSPEC;
-    hints.ai_socktype = SOCK_STREAM;
-    hints.ai_flags = AI_PASSIVE; // use my IP
 
     if ((rv = getaddrinfo(NULL, PORT, &hints, &servinfo)) != 0) {
         fprintf(stderr, "getaddrinfo: %s\n", gai_strerror(rv));
@@ -108,61 +122,77 @@ int main(int argc, char *argv[])
         break;
     }
 
-    freeaddrinfo(servinfo); // all done with this structure
-
-    if (p == NULL)  {
-        fprintf(stderr, "server: failed to bind\n");
-        exit(1);
-    }
 
     if (listen(sockfd, BACKLOG) == -1) {
         perror("listen");
-        exit(1);
-    }
-    
-    //////////
-    sa.sa_handler = sigchld_handler; // reap all dead processes
-    sigemptyset(&sa.sa_mask);
-    sa.sa_flags = SA_RESTART;
-    if (sigaction(SIGCHLD, &sa, NULL) == -1) {
-        perror("sigaction");
-        exit(1);
+        freeaddrinfo(servinfo);
+        close(sockfd);
+        sockfd = -1;
+        remove_data_file();
+        closelog();
+        return return_val;
     }
 
-    // printf("server: waiting for connections...\n");
-    
-    // FILE *fp = fopen(DATA_FILE, "a+");
+    while(is_active){
+        struct sockaddr_storage client_addr;
 
-    while(1) {  // main accept() loop
-        char buffer[1024];
-        
-        sin_size = sizeof their_addr;
-        new_fd = accept(sockfd, (struct sockaddr *)&their_addr, &sin_size);
-        if (new_fd == -1) {
-            perror("accept");
+        client_fd = accept(sockfd, (struct sockaddr *)&client_addr, &(socklen_t){sizeof(client_addr)});
+        if (client_fd == -1){
+            syslog(LOG_ERR, "accept error: %s", strerror(errno));
             continue;
         }
 
-        inet_ntop(their_addr.ss_family,get_in_addr((struct sockaddr *)&their_addr),s, sizeof s);
-        FILE *fp = fopen(DATA_FILE, "a+");        
-        ssize_t bytes_received;
-        printf("server: got connection from %s\n", s);
-        
-        while ((bytes_received = recv(new_fd, buffer, sizeof(buffer), 0)) > 0) {
-            buffer[bytes_received] = '\0';
-            fprintf(fp, "%s", buffer);
+        inet_ntop(client_addr.ss_family, get_in_addr((struct sockaddr *)&client_addr), addr_str, sizeof(addr_str));
 
-            char *newline = strchr(buffer, '\n');
-            if (newline != NULL) {
-                fflush(fp);
-                send_data_to_client(new_fd);
-                memset(buffer, 0, sizeof(buffer));
-            }
+        syslog(LOG_INFO, "Accepted connection from %s", addr_str);
+
+        FILE *data_file = fopen(DATA_FILE_NAME, "a+");
+
+        if(data_file == NULL){
+            syslog(LOG_ERR, "Error opening data file: %s", strerror(errno));
+                    close(client_fd);
+        client_fd = -1;
+
+        syslog(LOG_INFO, "Closed connection from %s", addr_str);
+        continue;
         }
 
-        close(new_fd);  // parent doesn't need this
-        fclose(fp);
+        while((res = recv(client_fd, recv_buffer, sizeof(recv_buffer), 0)) > 0){
+            syslog(LOG_DEBUG, "Received %d bytes", res);
+
+            fwrite(recv_buffer, sizeof(*recv_buffer), res, data_file);
+
+            if(memchr(recv_buffer, '\n', res) != NULL){
+                syslog(LOG_DEBUG, "Newline detected. Packet fully received");
+                break;
+            }
+
+            memset(recv_buffer, 0, sizeof(recv_buffer));
+        }
+
+        if(res == 0){
+            syslog(LOG_INFO, "Connection closed by client");
+            fclose(data_file);
+        } else if(res == -1){
+            syslog(LOG_ERR, "recv error: %s", strerror(errno));
+            fclose(data_file);
+        }
+
+        if(fseek(data_file, 0, SEEK_SET) == -1){
+            syslog(LOG_ERR, "Error seeking data file: %s", strerror(errno));
+            fclose(data_file);
+        }
+
+        while((res = fread(recv_buffer, sizeof(*recv_buffer), sizeof(recv_buffer), data_file)) > 0){
+            syslog(LOG_DEBUG, "Sending %d bytes", res);
+            res = send(client_fd, recv_buffer, res, 0);
+            if(res == -1){
+                syslog(LOG_ERR, "send error: %s", strerror(errno));
+                fclose(data_file);
+            }
+            memset(recv_buffer, 0, sizeof(recv_buffer));
+        }
     }
 
-    return 0;
 }
+
