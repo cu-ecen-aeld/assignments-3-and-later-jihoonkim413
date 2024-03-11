@@ -10,6 +10,8 @@
 #include <arpa/inet.h>
 #include <sys/wait.h>
 #include <signal.h>
+#include <stdbool.h>
+#include <sys/stat.h>
 
 #define PORT "9000"  // the port users will be connecting to
 #define DATA_FILE "/var/tmp/aesdsocketdata"
@@ -44,7 +46,7 @@ void send_data_to_client(int client_socket) {
     fclose(fp);
 }
 
-int main(void)
+int main(int argc, char *argv[]) 
 {
     int sockfd, new_fd;  // listen on sock_fd, new connection on new_fd
     struct addrinfo hints, *servinfo, *p;
@@ -54,6 +56,24 @@ int main(void)
     int yes=1;
     char s[INET6_ADDRSTRLEN];
     int rv;
+    bool daemon_mode = 0;
+
+    if (argc > 1 && strcmp(argv[1], "-d") == 0) {
+        daemon_mode = 1;
+    }
+
+    if (daemon_mode) {
+        pid_t pid = fork();
+        if (pid < 0) {
+            perror("Fork failed");
+            exit(EXIT_FAILURE);
+        }
+        if (pid > 0) {
+            exit(EXIT_SUCCESS); // Parent process exits
+        }
+        // Child process continues
+        umask(0); // Unmask the file mode
+    }
 
     memset(&hints, 0, sizeof hints);
     hints.ai_family = AF_UNSPEC;
