@@ -54,7 +54,7 @@ int main(int argc, char *argv[])
     socklen_t sin_size;
     struct sigaction sa;
     int yes=1;
-    char s[INET6_ADDRSTRLEN];
+    char s[INET_ADDRSTRLEN];
     int rv;
     bool daemon_mode = 0;
 
@@ -119,7 +119,8 @@ int main(int argc, char *argv[])
         perror("listen");
         exit(1);
     }
-
+    
+    //////////
     sa.sa_handler = sigchld_handler; // reap all dead processes
     sigemptyset(&sa.sa_mask);
     sa.sa_flags = SA_RESTART;
@@ -129,10 +130,12 @@ int main(int argc, char *argv[])
     }
 
     // printf("server: waiting for connections...\n");
-    char buffer[1024];
-    ssize_t bytes_received;
-    FILE *fp = fopen(DATA_FILE, "a+");
+    
+    // FILE *fp = fopen(DATA_FILE, "a+");
+
     while(1) {  // main accept() loop
+        char buffer[1024];
+        
         sin_size = sizeof their_addr;
         new_fd = accept(sockfd, (struct sockaddr *)&their_addr, &sin_size);
         if (new_fd == -1) {
@@ -140,10 +143,9 @@ int main(int argc, char *argv[])
             continue;
         }
 
-
         inet_ntop(their_addr.ss_family,get_in_addr((struct sockaddr *)&their_addr),s, sizeof s);
-        ssize_t bytes_received;
         FILE *fp = fopen(DATA_FILE, "a+");        
+        ssize_t bytes_received;
         printf("server: got connection from %s\n", s);
         
         while ((bytes_received = recv(new_fd, buffer, sizeof(buffer), 0)) > 0) {
@@ -159,6 +161,7 @@ int main(int argc, char *argv[])
         }
 
         close(new_fd);  // parent doesn't need this
+        fclose(fp);
     }
 
     return 0;
